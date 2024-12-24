@@ -5,74 +5,158 @@ Check page 160 onwards for details of the following:
 https://edge.edx.org/c4x/BITSPilani/EEE231/asset/8086_family_Users_Manual_1_.pdf
 """
 
-import struct
 import argparse
 from os import PathLike
 from typing import Optional
 
+OP_ENCODING_8086: dict[str, str] = {
+    "1101": "MOV",
+    "100010": "MOV",
+}
 
-def _disassemble_8086(filepath: PathLike):
-    op_code_decodes: dict = {"100010": "MOV"}
-    reg_decodes: dict = {
-        "w0": {
-            "000": "AL",
-            "001": "CL",
-            "010": "DL",
-            "011": "BL",
-            "100": "AH",
-            "101": "CH",
-            "110": "DH",
-            "111": "BH",
-        },
-        "w1": {
-            "000": "AX",
-            "001": "CX",
-            "010": "DX",
-            "011": "BX",
-            "100": "SP",
-            "101": "DP",
-            "110": "SI",
-            "111": "DI",
-        },
-    }
 
-    with open(filepath, "rb") as f:
-        machine_code = f.read()
+class Disassemble:
+    def __init__(self, filepath: PathLike):
+        self._file_path: PathLike = filepath
+        self._machine_code: bytes
 
-    instruction: str = ""
+        self._op_code: str = ""
+        self._d: Optional[str] = ""
+        self._w: str = ""
 
-    w: int = 0
+        self._mod: str = ""
+        self._reg: str = ""
+        self._rm: str = ""
 
-    i = 0
-    while i < len(machine_code):
-        byte_code = struct.unpack("B", machine_code[i : i + 1])[0]
-        i += 1
+        self.src: str = ""
+        self.dst: str = ""
 
-        binary_code = format(byte_code, "08b")
+        self._src_nmemonic: str = ""
+        self._dst_nmemonic: str = ""
 
-        if i % 2:
-            op_code: Optional[str] = op_code_decodes.get(binary_code[:6], None)
+    def _read_machine_code(self):
+        with open(self._file_path, "rb") as f:
+            self._machine_code: bytes = f.read()
 
-            if op_code is None:
-                continue
+    def _get_op_code(self):
+        self._op_binary: str = self._binary_code[:6]
+        self._op_code: str = OP_ENCODING_8086.get(self._op_binary, "")
+        if not self._op_code:
+            self._op_binary: str = self._binary_code[:4]
+            self._op_code: str = OP_ENCODING_8086.get(self._op_binary, "")
 
-            instruction += op_code
+    def _get_d_and_w(self) -> tuple[Optional[str], str]:
+        self._d: Optional[str] = None
+        self._w: str = self._binary_code[-1]  # 8th bit
 
-            w: int = int(binary_code[-1])  # W is in first byte
+        if self._op_binary == "100010":
+            self._d = self._binary_code[-2]  # 7th bit
+        elif self._op_binary == "1101":
+            self._d = None
 
+        return self._d, self._w
+
+    def _get_src_and_dst_mod(self, reg, rm):
+        self._mod: str = self._binary_code[:2]
+
+        if self._d == "1":
+            self._src: str = reg
+            self._dst: str = rm
         else:
-            binary_code = binary_code[
-                2:
-            ]  # Stripping MOD bits as we know it is an operation between registers instead of memory
-            reg_1 = binary_code[:3]
-            reg_2 = binary_code[3:]
+            self._src: str = rm
+            self._dst: str = reg
 
-            src: str = reg_decodes.get(f"w{w}", {}).get(reg_1)
-            dst: str = reg_decodes.get(f"w{w}", {}).get(reg_2)
+    def _get_mnemonics(self):
+        nmemonic_map: dict[str, str] = {}
+        if self._mod == "11":
+            if self._w == "0":
+                nmemonic_map: dict[str, str] = {
+                    "000": "AL",
+                    "001": "CL",
+                    "010": "DL",
+                    "011": "BL",
+                    "100": "AH",
+                    "101": "CH",
+                    "110": "DH",
+                    "111": "BH",
+                }
+            elif self._w == "1":
+                nmemonic_map: dict[str, str] = {
+                    "000": "AX",
+                    "001": "CX",
+                    "010": "DX",
+                    "011": "BX",
+                    "100": "SP",
+                    "101": "BP",
+                    "110": "SI",
+                    "111": "DI",
+                }
+        elif self._mod == "00":
+            nmemonic_map: dict[str, str] = {
+                "000": "[BX + SI]",
+                "001": "[BX + DI]",
+                "010": "[BP + SI]",
+                "011": "[BP + DI]",
+                "100": "[SI]",
+                "101": "[DI]",
+                "110": "DIR]CT ADDRESS",
+                "111": "[BX]",
+            }
+        elif self._mod == "01":
+            nmemonic_map: dict[str, str] = {
+                "000": "[BX + SI] + D8",
+                "001": "[BX + DI] + D8",
+                "010": "[BP + SI] + D8",
+                "011": "[BP + DI] + D8",
+                "100": "[SI] + D8",
+                "101": "[DI] + D8",
+                "110": "[BP] + D8",
+                "111": "[BX] + D8",
+            }
+        elif self._mod == "10":
+            nmemonic_map: dict[str, str] = {
+                "000": "[BX + SI] + D16",
+                "001": "[BX + DI] + D16",
+                "010": "[BP + SI] + D16",
+                "011": "[BP + DI] + D16",
+                "100": "[SI] + D16",
+                "101": "[DI] + D16",
+                "110": "[BP] + D16",
+                "111": "[BX] + D16",
+            }
 
-            instruction += f" {dst}, {src}\n"
+        if not nmemonic_map:
+            print("Failed to find nmemonic_map...")
+            return ""
 
-    print(instruction.lower())
+        self._src_nmemonic: str = nmemonic_map.get(self._src, "")
+        self._dst_nmemonic: str = nmemonic_map.get(self._dst, "")
+
+    def run(self):
+        self._read_machine_code()
+
+        for i, each_byte in enumerate(self._machine_code):
+            self._binary_code: str = format(each_byte, "08b")
+
+            if i % 2 == 0:
+                self._get_op_code()
+                self._get_d_and_w()
+                # print(f"OP: {self._op_code}, D: {self._d}, W: {self._w}")
+            else:
+                if not self._op_code:
+                    print(f"No op code, previous byte okay?: {self._binary_code}")
+                    return
+                reg: str = self._binary_code[2:5]
+                rm: str = self._binary_code[5:]
+
+                self._get_src_and_dst_mod(reg, rm)
+                self._get_mnemonics()
+
+                # print(f"MOD: {self._mod}, REG: {reg}, RM: {rm}")
+
+                print(
+                    f"{self._op_code} {self._src_nmemonic}, {self._dst_nmemonic}".lower()
+                )
 
 
 if __name__ == "__main__":
@@ -84,4 +168,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     filepath: PathLike = args.filepath
 
-    _disassemble_8086(filepath)
+    disassembler = Disassemble(filepath)
+
+    disassembler.run()
