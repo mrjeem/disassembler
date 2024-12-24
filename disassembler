@@ -10,7 +10,7 @@ from os import PathLike
 from typing import Optional
 
 OP_ENCODING_8086: dict[str, str] = {
-    "1101": "MOV",
+    "1011": "MOV",
     "100010": "MOV",
 }
 
@@ -28,11 +28,13 @@ class Disassemble:
         self._reg: str = ""
         self._rm: str = ""
 
+        self._immediate_mode: bool = False
+
         self.src: str = ""
         self.dst: str = ""
 
-        self._src_nmemonic: str = ""
-        self._dst_nmemonic: str = ""
+        self._src_mnemonic: str = ""
+        self._dst_mnemonic: str = ""
 
     def _read_machine_code(self):
         with open(self._file_path, "rb") as f:
@@ -45,32 +47,43 @@ class Disassemble:
             self._op_binary: str = self._binary_code[:4]
             self._op_code: str = OP_ENCODING_8086.get(self._op_binary, "")
 
+            self._immediate_mode: bool = True
+            self._reg: str = self._binary_code[-3:]
+
     def _get_d_and_w(self) -> tuple[Optional[str], str]:
         self._d: Optional[str] = None
-        self._w: str = self._binary_code[-1]  # 8th bit
 
         if self._op_binary == "100010":
             self._d = self._binary_code[-2]  # 7th bit
-        elif self._op_binary == "1101":
+            self._w: str = self._binary_code[-1]  # 8th bit
+        elif self._op_binary == "1011":
+            self._w = self._binary_code[-4]
             self._d = None
 
         return self._d, self._w
 
     def _get_src_and_dst_mod(self, reg, rm):
-        self._mod: str = self._binary_code[:2]
+        if self._immediate_mode:
+            self._mod = "11"
+        else:
+            self._mod: str = self._binary_code[:2]
 
-        if self._d == "1":
+        if self._d == "0":
             self._src: str = reg
             self._dst: str = rm
-        else:
+        elif self._d == "1":
             self._src: str = rm
+            self._dst: str = reg
+        else:
+            self._immediate_mode: bool = True
+            self._src: str = str(int(self._binary_code, 2))
             self._dst: str = reg
 
     def _get_mnemonics(self):
-        nmemonic_map: dict[str, str] = {}
+        mnemonic_map: dict[str, str] = {}
         if self._mod == "11":
             if self._w == "0":
-                nmemonic_map: dict[str, str] = {
+                mnemonic_map: dict[str, str] = {
                     "000": "AL",
                     "001": "CL",
                     "010": "DL",
@@ -81,7 +94,7 @@ class Disassemble:
                     "111": "BH",
                 }
             elif self._w == "1":
-                nmemonic_map: dict[str, str] = {
+                mnemonic_map: dict[str, str] = {
                     "000": "AX",
                     "001": "CX",
                     "010": "DX",
@@ -92,7 +105,7 @@ class Disassemble:
                     "111": "DI",
                 }
         elif self._mod == "00":
-            nmemonic_map: dict[str, str] = {
+            mnemonic_map: dict[str, str] = {
                 "000": "[BX + SI]",
                 "001": "[BX + DI]",
                 "010": "[BP + SI]",
@@ -103,7 +116,7 @@ class Disassemble:
                 "111": "[BX]",
             }
         elif self._mod == "01":
-            nmemonic_map: dict[str, str] = {
+            mnemonic_map: dict[str, str] = {
                 "000": "[BX + SI] + D8",
                 "001": "[BX + DI] + D8",
                 "010": "[BP + SI] + D8",
@@ -114,7 +127,7 @@ class Disassemble:
                 "111": "[BX] + D8",
             }
         elif self._mod == "10":
-            nmemonic_map: dict[str, str] = {
+            mnemonic_map: dict[str, str] = {
                 "000": "[BX + SI] + D16",
                 "001": "[BX + DI] + D16",
                 "010": "[BP + SI] + D16",
@@ -125,12 +138,17 @@ class Disassemble:
                 "111": "[BX] + D16",
             }
 
-        if not nmemonic_map:
-            print("Failed to find nmemonic_map...")
+        if not mnemonic_map:
+            print("Failed to find mnemonic_map...")
             return ""
 
-        self._src_nmemonic: str = nmemonic_map.get(self._src, "")
-        self._dst_nmemonic: str = nmemonic_map.get(self._dst, "")
+        if self._immediate_mode:
+            self._src_mnemonic: str = self._src
+
+        else:
+            self._src_mnemonic: str = mnemonic_map.get(self._src, "")
+
+        self._dst_mnemonic: str = mnemonic_map.get(self._dst, "")
 
     def run(self):
         self._read_machine_code()
@@ -146,16 +164,25 @@ class Disassemble:
                 if not self._op_code:
                     print(f"No op code, previous byte okay?: {self._binary_code}")
                     return
-                reg: str = self._binary_code[2:5]
+
+                if not self._immediate_mode:
+                    self._reg: str = self._binary_code[2:5]
                 rm: str = self._binary_code[5:]
 
-                self._get_src_and_dst_mod(reg, rm)
+                self._get_src_and_dst_mod(self._reg, rm)
                 self._get_mnemonics()
 
-                # print(f"MOD: {self._mod}, REG: {reg}, RM: {rm}")
+                # Reset
+                self._mod = "11"
+                self._d = ""
+                self._w = ""
+                self._immediate_mode: bool = False
+
+                # print(f"MOD: {self._mod}, REG: {self._reg}, RM: {rm}")
 
                 print(
-                    f"{self._op_code} {self._src_nmemonic}, {self._dst_nmemonic}".lower()
+                    f"{self._op_code} {self._dst_mnemonic}, {self._src_mnemonic}".lower(),
+                    # end="\n\n",
                 )
 
 
