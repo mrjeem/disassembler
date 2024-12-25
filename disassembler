@@ -157,17 +157,17 @@ class Disassemble:
         first_byte: bool = True
         one_byte_displacement: bool = False
         for i, each_byte in enumerate(self._machine_code):
+            self._binary_code: str = format(each_byte, "08b")
+
             if one_byte_displacement:
                 one_byte_displacement: bool = False
                 continue
-
-            self._binary_code: str = format(each_byte, "08b")
 
             if first_byte:
                 self._get_op_code()
                 self._get_d_and_w()
                 first_byte = False
-                # print(f"OP: {self._op_code}, D: {self._d}, W: {self._w}")
+                # print(self._binary_code)
             else:
                 if not self._op_code:
                     print(f"No op code, previous byte okay?: {self._binary_code}")
@@ -179,15 +179,15 @@ class Disassemble:
 
                 self._get_src_dst_and_mod(self._reg, rm)
 
-                if self._w == "1" and i != 1:
-                    self._src: str = str(
-                        self._binary_code + format(self._machine_code[i + 1], "08b"),
-                    )
-                    one_byte_displacement: bool = True
                 if self._immediate_mode:
-                    if len(self._src) == 8:
-                        int_val = ctypes.c_int8(int(self._src, 2)).value
-                    else:
+                    int_val = ctypes.c_int8(int(self._src, 2)).value
+
+                    if self._w == "1":
+                        self._src: str = str(
+                            self._binary_code
+                            + format(self._machine_code[i + 1], "08b"),
+                        )
+                        one_byte_displacement: bool = True
                         bytes_str = int(self._src, 2).to_bytes(2, "big")
                         array_type = ctypes.c_ubyte * 2
                         array = array_type(*bytes_str)
@@ -199,7 +199,9 @@ class Disassemble:
 
                 self._get_mnemonics()
 
+                # print(self._binary_code)
                 # print(f"MOD: {self._mod}, REG: {self._reg}, RM: {rm}")
+                # print(f"OP: {self._op_code}, D: {self._d}, W: {self._w}")
 
                 # Reset
                 self._mod = "11"
