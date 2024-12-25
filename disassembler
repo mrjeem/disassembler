@@ -5,6 +5,7 @@ Check page 160 onwards for details of the following:
 https://edge.edx.org/c4x/BITSPilani/EEE231/asset/8086_family_Users_Manual_1_.pdf
 """
 
+import ctypes
 import argparse
 from os import PathLike
 from typing import Optional
@@ -62,7 +63,7 @@ class Disassemble:
 
         return self._d, self._w
 
-    def _get_src_and_dst_mod(self, reg, rm):
+    def _get_src_dst_and_mod(self, reg, rm):
         if self._immediate_mode:
             self._mod = "11"
         else:
@@ -76,7 +77,7 @@ class Disassemble:
             self._dst: str = reg
         else:
             self._immediate_mode: bool = True
-            self._src: str = str(int(self._binary_code, 2))
+            self._src: str = self._binary_code
             self._dst: str = reg
 
     def _get_mnemonics(self):
@@ -153,12 +154,19 @@ class Disassemble:
     def run(self):
         self._read_machine_code()
 
+        first_byte: bool = True
+        one_byte_displacement: bool = False
         for i, each_byte in enumerate(self._machine_code):
+            if one_byte_displacement:
+                one_byte_displacement: bool = False
+                continue
+
             self._binary_code: str = format(each_byte, "08b")
 
-            if i % 2 == 0:
+            if first_byte:
                 self._get_op_code()
                 self._get_d_and_w()
+                first_byte = False
                 # print(f"OP: {self._op_code}, D: {self._d}, W: {self._w}")
             else:
                 if not self._op_code:
@@ -169,21 +177,43 @@ class Disassemble:
                     self._reg: str = self._binary_code[2:5]
                 rm: str = self._binary_code[5:]
 
-                self._get_src_and_dst_mod(self._reg, rm)
+                self._get_src_dst_and_mod(self._reg, rm)
+
+                if self._w == "1" and i != 1:
+                    self._src: str = str(
+                        self._binary_code + format(self._machine_code[i + 1], "08b"),
+                    )
+                    one_byte_displacement: bool = True
+                if self._immediate_mode:
+                    if len(self._src) == 8:
+                        int_val = ctypes.c_int8(int(self._src, 2)).value
+                    else:
+                        bytes_str = int(self._src, 2).to_bytes(2, "big")
+                        array_type = ctypes.c_ubyte * 2
+                        array = array_type(*bytes_str)
+                        int_val = ctypes.cast(
+                            ctypes.addressof(array), ctypes.POINTER(ctypes.c_int16)
+                        ).contents.value
+
+                    self._src: str = str(int_val)
+
                 self._get_mnemonics()
+
+                # print(f"MOD: {self._mod}, REG: {self._reg}, RM: {rm}")
 
                 # Reset
                 self._mod = "11"
                 self._d = ""
                 self._w = ""
                 self._immediate_mode: bool = False
-
-                # print(f"MOD: {self._mod}, REG: {self._reg}, RM: {rm}")
+                first_byte = True
 
                 print(
                     f"{self._op_code} {self._dst_mnemonic}, {self._src_mnemonic}".lower(),
                     # end="\n\n",
                 )
+
+            # print(f"i: {i}")
 
 
 if __name__ == "__main__":
